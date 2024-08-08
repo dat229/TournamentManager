@@ -18,10 +18,11 @@ contract TokentestERC20 is ERC20, ERC20Burnable, Ownable {
 
     event buyToken(address buyer, uint tokenAmount, uint price);
 
+    // E tạo token và phát hành 10 token khi khởi tạo.
      constructor(address stableTokenAddress) ERC20("GiangDat", "GD") Ownable(msg.sender) {
         require(stableTokenAddress != address(0), "Invalid address");
         withdrawWallet = payable(owner());
-
+        
         _mint(msg.sender, 10 * 10**18);
     }
 
@@ -35,6 +36,9 @@ contract TokentestERC20 is ERC20, ERC20Burnable, Ownable {
         buyers[lists].price = _price;
     }
     
+    // Em mua bằng đồng amoy
+    // Số lượng tiền max có thể mua.Nếu số lượng đã mua mà lớn hơn max thì không mua được.
+    // Lấy ra giá tiền khi gửi lên sau đó sẽ chia cho số tiền đổi ra có thể mua được bao nhiêu token.
     function _buyToken() public {
         uint avaiableTokenAmount = buyers[msg.sender].maxAmount - buyers[msg.sender].boughtAmount;
         
