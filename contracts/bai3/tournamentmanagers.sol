@@ -1,154 +1,125 @@
 pragma solidity >=0.8.2 <0.9.0;
 
-import "@chainlink/contracts/src/v0.8/vrf/dev/interfaces/IVRFCoordinatorV2Plus.sol";
-import "@chainlink/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./tournament.sol";
 
-contract TournamentManagers is Ownable {
-    bytes32 internal keyHash;
-    uint256 internal fee;
+contract TournamentManagers is AccessControl, Ownable(msg.sender) {
+    bytes32 public constant MANAGER_ROLE = keccak256("MANAGER_ROLE");
+    bytes32 public constant REFEREE_ROLE = keccak256("REFEREE_ROLE");
+    bytes32 public constant PLAYER_ROLE = keccak256("PLAYER_ROLE");
 
-    // Random
-    IVRFCoordinatorV2Plus internal vrfCoordinator;
-    uint256 s_subscriptionId;
-    uint16 internal requestConfirmations = 3;
-    uint32 internal callbackGasLimit = 250000;
-    uint32 internal numWords = 1;
+    address payable withdrawWallet;
+    uint IdtournamentCount;
+    uint countTournament;
+    uint256 feeTournament;
 
-    mapping(address => bool) public admins;
-    mapping(address => bool) public referees;
-    LinkTokenInterface internal LINK;
+    mapping (uint Idtournament => address) tournaments;
+    mapping (uint countTournament => Tournament) public listTournament;
 
-    mapping(uint256 => address) public tournaments;
-    mapping(uint256 => uint256) public requestIdToTournamentId;
-    uint256 public tournamentCount;
-
-    event TournamentCreated(uint256 id, string name, uint256 startTime, uint256 endTime, uint256 fee);
-    event TournamentEdited(uint256 id, string name, uint256 startTime, uint256 endTime, uint256 fee);
-    event PlayerJoined(uint256 tournamentId, address player);
-    event WinnerSet(uint256 tournamentId, address winner);
-    event RefereeAdded(address referee);
-    event RefereeUpdated(address referee);
-
-    modifier onlyAdmin() {
-        require(admins[msg.sender], "Not the Admin");
-        _;
+    event creatTournament(uint countTournament);
+    event JoinTournament(uint countTournament, address player);
+    event WithdrawAward(uint _tournamentId, address winner);
+    
+    constructor(){
+        withdrawWallet = payable(msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(MANAGER_ROLE, msg.sender);
     }
 
-    modifier onlyReferee() {
-        require(referees[msg.sender], "Not the referee");
-        _;
+    function setDrawWinnings(address payable _wallet) public {
+        withdrawWallet = _wallet;
     }
 
-    constructor (
-        address _VRFCoordinator,
-        address _LinkToken,
-        bytes32 _keyHash,
-        uint256 _fee,
-        uint256 subscriptionId
-    ) Ownable(msg.sender) {
-        admins[msg.sender] = true;
-        keyHash = _keyHash;
-        fee = _fee;
-        LINK = LinkTokenInterface(_LinkToken);
-        s_subscriptionId = subscriptionId;
-        vrfCoordinator = IVRFCoordinatorV2Plus(_VRFCoordinator);
+    function setManagerTournament(uint _countTournament, address manager) public onlyOwner{
+        listTournament[_countTournament].setManager(manager);
     }
 
-    function setAdmin(address _admin, bool _isAdmin) public onlyOwner {
-        admins[_admin] = _isAdmin;
+    function setFee(uint256 _fee) public onlyOwner{
+        feeTournament = _fee;
     }
 
-    function createTournament(
-        string memory _name,
-        uint256 _startTime,
-        uint256 _endTime,
-        uint256 _fee
-    ) public onlyAdmin {
-        Tournament newTournament = new Tournament(_name, _startTime, _endTime, _fee);
-        tournamentCount++;
-        tournaments[tournamentCount] = address(newTournament);
-        emit TournamentCreated(tournamentCount, _name, _startTime, _endTime, _fee);
+    function setRefereeTournament(uint _countTournament, address referee) public onlyOwner{
+       listTournament[_countTournament].setReferee(referee);
     }
 
-    function editTournament(
-        uint256 _id,
-        string memory _name,
-        uint256 _startTime,
-        uint256 _endTime,
-        uint256 _fee
-    ) public onlyAdmin {
-        Tournament tournament = Tournament(tournaments[_id]);
-        tournament.editTournament(_name, _startTime, _endTime, _fee);
-        emit TournamentEdited(_id, _name, _startTime, _endTime, _fee);
+    function setMoves(uint _countTournament,uint32 matchId, uint32 move) public onlyOwner{
+        listTournament[_countTournament].setMoves(matchId,move);
     }
 
-    function joinTournament(uint256 _id) public payable {
-        Tournament tournament = Tournament(tournaments[_id]);
-        tournament.joinTournament{value: msg.value}();
-        emit PlayerJoined(_id, msg.sender);
+    function createNewTournament(uint startTime, uint endTime) public onlyOwner{
+        require(feeTournament > 0, "Fees have not yet been established");
+        countTournament++;
+        Tournament newTournament = new Tournament(startTime, endTime, feeTournament);
+        listTournament[countTournament] = newTournament;
+        emit creatTournament(countTournament);
     }
 
-    function withdrawWinnings(uint256 _id) public {
-        Tournament tournament = Tournament(tournaments[_id]);
-        tournament.withdrawWinnings();
+     function editTournament(uint _tournamentId, uint newTimeStart, uint newTimeEnd) public onlyOwner{
+        require(newTimeStart <= block.timestamp, "Time error");
+        require(newTimeEnd > newTimeStart, "Time error");
+        Tournament tournament = listTournament[_tournamentId];
+        listTournament[_tournamentId].setTournament( newTimeStart, newTimeEnd, feeTournament);
     }
 
-    function setReferee(address _referee, bool _isReferee) public onlyAdmin {
-        referees[_referee] = _isReferee;
-        if (_isReferee) {
-            emit RefereeAdded(_referee);
-        } else {
-            emit RefereeUpdated(_referee);
+    function setMatchs(uint _tournamentId, uint32 player1, uint32 player2) public onlyOwner{
+        listTournament[_tournamentId].setMatchs(player1, player2);
+    }
+
+    function joinTournament(uint _tournamentId, uint32 randomNumber ) public payable{
+        require(feeTournament > 0, "Fees have not yet been established");
+        require(msg.value == feeTournament, "transfer value did not match with fee");
+        listTournament[_tournamentId].joinMath(msg.sender, randomNumber);
+        
+        emit JoinTournament(_tournamentId, msg.sender);
+    }
+
+    function setGames(uint _tournamentId, uint32 matchId, uint32 [] memory moves, uint32 result) public onlyOwner{
+        listTournament[_tournamentId].setGames(matchId, moves,result);
+    }
+
+    function setStartTournament(uint _tournamentId) public view onlyOwner{
+        listTournament[_tournamentId].startTournament;
+    }
+
+    //set winner
+    function setWinner(uint _tournamentId, address _winner) public {
+        address tournament = tournaments[_tournamentId];
+        require(listTournament[_tournamentId].hasRole(keccak256("REFEREE_ROLE"), msg.sender), "Only referee can do this function");
+        
+        address[] memory players = listTournament[_tournamentId].getPlayers();
+        bool checkPlayer = isPlayer(_winner,players);
+        require(checkPlayer,"Player does not exist");
+
+        listTournament[_tournamentId].setWinner(_winner);
+    }
+
+    //check player
+    function isPlayer(address _addressToCheck,address[] memory players) public pure returns (bool) {
+        for (uint i = 0; i < players.length; i++) {
+            if (players[i] == _addressToCheck) {
+                return true;
+            }
         }
+        return false;
     }
 
-    function setWinner(uint256 _id, address _winner) public onlyReferee {
-        Tournament tournament = Tournament(tournaments[_id]);
-        tournament.setWinner(_winner);
-        emit WinnerSet(_id, _winner);
+
+    function withdrawAward(uint _tournamentId, address winner) public onlyOwner{
+        require(listTournament[_tournamentId].playerWinner() != address(0), "This tournament did not have winner");
+        require(listTournament[_tournamentId].playerWinner() == winner, "This address are not winner of this tournament");
+
+        uint countPlayer = listTournament[_tournamentId].getPlayers().length;
+        
+        uint totalAmount = countPlayer * feeTournament;
+        uint fee = (totalAmount * 5) / 100;
+        uint award = totalAmount - fee;
+
+        payable(winner).transfer(award);
+        emit WithdrawAward(_tournamentId,winner);
     }
 
-    function requestRandomnessForPlayerPosition(uint256 _id) public onlyAdmin returns (uint256 requestId) {
-        require(LINK.balanceOf(address(this)) >= fee, "Not enough LINK");
-
-        requestId = vrfCoordinator.requestRandomWords(
-            VRFV2PlusClient.RandomWordsRequest({
-                keyHash: keyHash,
-                subId: s_subscriptionId,
-                requestConfirmations: requestConfirmations,
-                callbackGasLimit: callbackGasLimit,
-                numWords: numWords,
-                extraArgs: VRFV2PlusClient._argsToBytes(VRFV2PlusClient.ExtraArgsV1({nativePayment: true}))
-            })
-        );
-        requestIdToTournamentId[requestId] = _id;
-        return requestId;
-    }
-
-    function fulfillRandomness(uint256 requestId, uint256 randomness) internal {
-        uint256 tournamentId = getTournamentIdByRequestId(requestId);
-        Tournament tournament = Tournament(tournaments[tournamentId]);
-
-        require(tournament.randomnessRequestId() == requestId, "Invalid requestId");
-
-        address[] memory playerss = tournament.players();
-        require(playerss.length > 0, "No players to choose from");
-
-        uint256 winnerIndex = randomness % playerss.length;
-        address winner = playerss[winnerIndex];
-
-        tournament.setWinner(winner);
-        emit WinnerSet(tournamentId, winner);
-    }
-
-    function getTournamentIdByRequestId(uint256 requestId) internal view returns (uint256) {
-       uint256 tournamentId = requestIdToTournamentId[requestId];
-        require(tournamentId != 0, "Invalid requestId");
-        return tournamentId;
-    }
 
     receive() external payable {}
+    fallback() external payable {}
 }
